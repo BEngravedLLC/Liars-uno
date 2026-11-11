@@ -25,7 +25,8 @@ const ACTIONS = ['skip', 'reverse', 'draw2'];
 const CLAIMABLE = [...NUMBERS, ...ACTIONS];
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
+const PUB = require('fs').existsSync(path.join(__dirname, 'public')) ? path.join(__dirname, 'public') : __dirname;
+['index.html', 'client.js', 'style.css'].forEach((f) => app.get(f === 'index.html' ? '/' : '/' + f, (req, res) => res.sendFile(path.join(PUB, f))));
 app.get('/health', (req, res) => res.send('ok'));
 const server = http.createServer(app);
 const io = new Server(server);
