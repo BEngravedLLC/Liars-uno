@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Liar's UNO Online</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 1. The "are you 7+?" question -->
+  <section id="gate" class="screen">
+    <div class="panel gate-panel">
+      <div class="logo">LIAR'S <span>UNO</span></div>
+      <p class="kicker">This box says ages 7+. Prove it. 🕵️</p>
+      <h2 id="gateQ"></h2>
+      <div id="gateOpts" class="gate-opts"></div>
+      <p id="gateMsg" class="gate-msg"></p>
+    </div>
+  </section>
+
+  <!-- 2. Name + room -->
+  <section id="join" class="screen hidden">
+    <form id="joinForm" class="panel join-panel" autocomplete="off">
+      <div class="logo">LIAR'S <span>UNO</span></div>
+      <p id="gatePassed" class="kicker">✅ Certified big kid. Welcome to the table.</p>
+      <label>Your name
+        <input id="nameIn" maxlength="16" placeholder="e.g. Bronson" required>
+      </label>
+      <div class="photo-pick">
+        <button type="button" class="photo-circle" id="photoBtn" title="Add a profile picture">
+          <img id="photoPreview" alt="" class="hidden"><span id="photoPlus">📷</span>
+        </button>
+        <div class="photo-text">
+          <b>Profile picture</b> <small>(optional)</small><br>
+          <button type="button" class="linkbtn" id="photoPickBtn">Upload PNG, JPG or SVG</button>
+          <button type="button" class="linkbtn hidden" id="photoClear">Remove</button>
+        </div>
+      </div>
+      <label>Room code <small>(everyone types the same one)</small>
+        <input id="roomIn" maxlength="10" placeholder="UNO">
+      </label>
+      <button class="btn big red" type="submit">Sit down at the table</button>
+      <p id="joinErr" class="err"></p>
+      <p class="hint">2 to 6 players. Send everyone the link and the room code.</p>
+    </form>
+  </section>
+
+  <!-- 3. The game -->
+  <div id="game" class="hidden">
+    <header class="topbar">
+      <div class="logo small">LIAR'S <span>UNO</span></div>
+      <div class="chips">
+        <span class="chip" id="roomChip">Room</span>
+        <span class="chip" id="handChip"></span>
+        <button class="chip btnchip" id="inviteBtn" type="button">🔗 Copy invite link</button>
+      </div>
+      <div class="top-actions">
+        <button class="btn ghost" id="rulesBtn" type="button">📖 Rule book</button>
+        <button class="btn ghost" id="sideBtn" type="button">💬 Chat & scores</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <main class="table">
+        <section id="seats" class="seats"></section>
+
+        <section class="middle">
+          <div id="lobbyBox" class="lobby hidden"></div>
+          <div id="pileBox" class="piles">
+            <div class="pile-wrap">
+              <button id="drawPile" class="card back" type="button" aria-label="Draw a card"><span>LIAR'S</span></button>
+              <div class="pile-label" id="deckCount"></div>
+            </div>
+            <div class="pile-wrap">
+              <div id="discard"></div>
+              <div class="pile-label" id="colorLabel"></div>
+            </div>
+            <div id="dirBox" class="dir"></div>
+          </div>
+          <div id="status" class="status"></div>
+          <div id="actionPanel" class="action-panel hidden"></div>
+        </section>
+
+        <section class="me">
+          <div class="me-bar">
+            <div class="me-name" id="meName" title="Tap your picture to change it"></div>
+            <div class="me-buttons">
+              <button class="btn" id="drawBtn" type="button">Draw</button>
+              <button class="btn" id="passBtn" type="button">Keep & pass</button>
+              <button class="btn uno" id="unoBtn" type="button">UNO!</button>
+            </div>
+          </div>
+          <div id="hand" class="hand"></div>
+        </section>
+      </main>
+
+      <aside id="side" class="side">
+        <div class="side-block">
+          <h3>Scoreboard <small id="targetLbl"></small></h3>
+          <div id="scores"></div>
+          <button class="btn ghost tiny hidden" id="resetScoresBtn" type="button">Reset scores</button>
+        </div>
+        <div class="side-block chat-block">
+          <h3>Table talk</h3>
+          <div id="chatLog" class="chat-log"></div>
+          <form id="chatForm" class="chat-form" autocomplete="off">
+            <input id="chatIn" maxlength="300" placeholder="Talk trash nicely...">
+            <button class="btn red" type="submit">Send</button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Floating rule book (doesn't block the game) -->
+  <div id="rulebook" class="rulebook hidden" role="dialog" aria-label="Rule book">
+    <div class="rb-head" id="rbHead">
+      <span>📖 Liar's UNO rules</span>
+      <span class="rb-tools">
+        <button type="button" id="rbFade" title="See-through">👻</button>
+        <button type="button" id="rbClose" title="Close">✕</button>
+      </span>
+    </div>
+    <div class="rb-body">
+      <h4>Goal</h4>
+      <p>Be first to get rid of all your cards.</p>
+
+      <h4>Two kinds of cards</h4>
+      <p><b>Regular cards</b> are always played <b>face up</b>. They must match the pile by color, number or symbol.</p>
+      <p><b>Liar's cards</b> (the ones with the white ring <span class="ring"></span> in the corner) are always played <b>face down</b>, and you say what they are.</p>
+
+      <h4>Playing a Liar's card</h4>
+      <p>If it matches, tell the truth. If it doesn't, <b>lie</b>, but make it believable: it has to be a card of the pile's color, the same number or symbol, or a Wild Draw 4.</p>
+      <p>Anyone can <b>Call bluff!</b> before time runs out:</p>
+      <ul>
+        <li>Caught lying? You take the card back <b>and draw 1</b>.</li>
+        <li>Telling the truth? The person who called you <b>draws 1</b>.</li>
+        <li>Nobody calls it? It counts as whatever you said, and its action happens, even if you lied.</li>
+      </ul>
+
+      <h4>Can't play?</h4>
+      <p>Draw 1. If it can be played, you may play it right away, otherwise your turn ends. You can also choose to draw even if you could play.</p>
+
+      <h4>Action cards (all are Liar's cards)</h4>
+      <ul>
+        <li><b>Skip</b>: next player loses their turn.</li>
+        <li><b>Reverse</b>: flips direction (with 2 players it works like a Skip).</li>
+        <li><b>Draw Two</b>: next player draws 2 and loses their turn.</li>
+        <li><b>Wild Draw 4</b>: playable on anything. Next player draws 4 and loses their turn. You pick the color.</li>
+      </ul>
+
+      <h4>Wild Liar's Challenge (played face up)</h4>
+      <p>You pick a color. Everyone else puts one card face down and says it's that color (wilds don't count). No card of that color? Put anything down and bluff.</p>
+      <p>You then flip players' cards one at a time. Liars take their card back and draw 1. Once you flip someone who told the truth (or you stop), that player and everyone you didn't flip get to discard their card. Going out this way wins, even for several players at once.</p>
+
+      <h4>Special numbers</h4>
+      <ul>
+        <li><b>7 Swap</b>: swap hands with a player you choose.</li>
+        <li><b>0 Pass</b>: everyone passes their hand to the next player.</li>
+        <li>If a 7 or 0 gets challenged and was true, the penalty card is drawn after the swap.</li>
+      </ul>
+
+      <h4>UNO!</h4>
+      <p>Hit <b>UNO!</b> when you're down to one card (you can hit it with 2 cards on your turn, right before you play). If someone catches you first with the <b>🎯 Catch</b> button before the next player moves, you draw 2.</p>
+
+      <h4>Winning & scoring</h4>
+      <p>If your last card is face down and nobody catches a lie, you win the hand. You score points for what's left in everyone else's hand: numbers = face value, Skip/Reverse/Draw Two = 20, wilds = 50. First to <b>500</b> wins the match.</p>
+    </div>
+  </div>
+
+  <input type="file" id="photoFile" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif,.svg" class="hidden">
+  <div id="modal" class="modal hidden"><div class="modal-card" id="modalCard"></div></div>
+  <div id="toasts" class="toasts"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
