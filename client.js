@@ -234,12 +234,12 @@
     const cls = wild ? 'wild' : c.color;
     const v = SHORT[c.value] || c.value;
     const tag = c.value === 'wlc' ? 'CHALLENGE' : '';
-    return `<div class="card ${cls} ${extra}" data-id="${c.id ?? ''}" title="${esc((c.liar ? "Liar's card: " : '') + label(c))}">
+    return `<div class="card ${cls} ${c.liar ? 'liar' : 'regular'} ${extra}" data-id="${c.id ?? ''}" title="${esc((c.liar ? "Liar's card (play face down): " : 'Regular card: ') + label(c))}">
       <span class="corner tl">${v}</span>
       <span class="big">${v}</span>
       <span class="corner br">${v}</span>
       ${!wild && c.color ? `<span class="sym">${SYM[c.color]}</span>` : ''}
-      ${c.liar ? '<span class="liar-ring"></span>' : ''}
+      ${c.liar ? '<span class="liar-tag">LIAR\'S</span>' : ''}
       ${tag ? `<span class="tagline">${tag}</span>` : ''}
     </div>`;
   }
@@ -261,6 +261,7 @@
   const playersInHand = () => S.players.filter((p) => p.inHand);
   const matches = (c) => c.value === 'wd4' || c.value === 'wlc' || c.color === S.currentColor || c.value === S.topValue;
   const isTruth = (card, claim) => card.value === claim.value && (card.value === 'wd4' || card.color === claim.color);
+  const stackOn = () => S && S.drawStack > 0 && S.phase === 'play';
   const isMine = (st) => st && st.turnId === st.me && st.phase === 'play';
   const mustSubmit = (st) => st && st.phase === 'wlc-submit' && st.wlc && st.wlc.playerId !== st.me && !st.wlc.claims[st.me] && (st.players.find((p) => p.id === st.me) || {}).inHand;
   const canCall = (st) => st && st.phase === 'challenge' && st.pending && st.pending.playerId !== st.me && !st.pending.responded.includes(st.me) && (st.players.find((p) => p.id === st.me) || {}).inHand;
@@ -421,11 +422,17 @@
         bigPop({ glyph: '⇄', word: 'REVERSE!', sub: f.target ? `${n(f.target)} is skipped` : 'Direction flipped', cls: 'blue spin', sound: 'whoosh' });
         break;
       }
-      case 'draw2': bigPop({ glyph: '+2', word: 'DRAW TWO!', sub: `${n(f.target)} draws 2`, cls: 'shakey', sound: 'whoosh' }); break;
-      case 'wd4': bigPop({ glyph: '+4', word: 'WILD!', sub: `${n(f.target)} draws 4 · color is ${cap(f.color)}`, cls: (colCls[f.color] || '') + ' shakey', sound: 'whoosh' }); break;
+      case 'stack': {
+        const stacked = f.total > f.add;
+        bigPop({ glyph: `+${f.total}`, word: stacked ? 'STACKED!' : f.add === 2 ? 'DRAW TWO!' : 'WILD!',
+          sub: `${n(f.target)} is facing +${f.total}${f.color ? ` · color is ${cap(f.color)}` : ''}`, cls: (f.color ? colCls[f.color] || '' : '') + ' shakey', sound: stacked ? 'uno' : 'whoosh' });
+        shakeSeat(f.target);
+        break;
+      }
+      case 'ouch': bigPop({ glyph: `+${f.n}`, word: 'OUCH!', sub: `${n(f.target)} takes ${f.n} cards`, cls: 'red shakey', sound: 'busted' }); shakeSeat(f.target); break;
       case 'swap': bigPop({ glyph: '7', word: 'SWAP!', sub: `${n(f.a)} ⇄ ${n(f.b)}`, cls: 'spin', sound: 'whoosh' }); shakeSeat(f.a); shakeSeat(f.b); break;
       case 'zero': bigPop({ glyph: '0', word: 'PASS IT ON!', sub: 'Everyone passes their hand', cls: 'spin', sound: 'whoosh' }); break;
-      case 'busted': bigPop({ glyph: '✗', word: 'BUSTED!', sub: `${n(f.target)} was lying! It was a ${label(f.card)}`, cls: 'red shakey', sound: 'busted' }); shakeSeat(f.target); break;
+      case 'busted': bigPop({ glyph: '✗', word: 'BUSTED!', sub: `${n(f.target)} was lying! It was a ${label(f.card)}${f.eat ? ` · eats the +${f.eat} stack too!` : ''}`, cls: 'red shakey', sound: 'busted' }); shakeSeat(f.target); break;
       case 'truth': bigPop({ glyph: '✓', word: 'TRUTH!', sub: `${n(f.target)} wasn't lying · ${n(f.by)} draws 1`, cls: 'green', sound: 'truth' }); shakeSeat(f.by); break;
       case 'uno': bigPop({ glyph: 'UNO!', word: '', sub: `${n(f.target)} has one card left!`, sound: 'uno', confetti: true, small: true }); break;
       case 'caught': bigPop({ glyph: '!', word: 'CAUGHT!', sub: `${n(f.target)} forgot to yell UNO · +2 cards`, cls: 'red shakey', sound: 'busted' }); shakeSeat(f.target); break;
@@ -501,7 +508,7 @@
     const p = $('#turnPill');
     let txt = '', mine = false;
     if (S.phase === 'play' || S.phase === 'challenge') {
-      if (S.turnId === S.me && S.phase === 'play') { txt = '🟡 YOUR TURN!'; mine = true; }
+      if (S.turnId === S.me && S.phase === 'play') { txt = stackOn() ? `🔥 +${S.drawStack} COMING! STACK OR TAKE IT` : '🟡 YOUR TURN!'; mine = true; }
       else if (S.phase === 'challenge') txt = `🤔 ${pName(S.pending && S.pending.playerId)} might be bluffing...`;
       else txt = `⏳ ${pName(S.turnId)}'s turn`;
     } else if (S.phase === 'wlc-submit') { mine = !!mustSubmit(S); txt = mine ? '🟡 PICK A CARD TO PUT DOWN!' : "🃏 Wild Liar's Challenge"; }
@@ -597,6 +604,10 @@
     }
     // Deck
     $('#deckCount').textContent = `${S.deckCount} left`;
+    $('#deckTag').textContent = stackOn() && myTurn() ? `TAKE +${S.drawStack}` : 'DRAW';
+    const sb2 = $('#stackBadge');
+    if (stackOn()) { sb2.textContent = `+${S.drawStack}`; sb2.classList.remove('hidden'); sb2.style.animation = 'none'; void sb2.offsetWidth; sb2.style.animation = ''; }
+    else sb2.classList.add('hidden');
     $('#drawPile').disabled = !(myTurn() && S.drawnCard == null);
     // Messy discard pile
     const under = (S.pile || []).map((e) => {
@@ -644,7 +655,8 @@
     // Status line
     let s = '';
     if (S.phase === 'play') {
-      if (myTurn()) s = S.drawnCard != null ? '<b>Play the card you drew</b> (glowing) or hit Keep & pass.' : '<b>Your turn!</b> Play a card, bluff with a Liar\'s card, or draw.';
+      if (myTurn() && stackOn()) s = `<b>+${S.drawStack} is coming at you!</b> Stack a +2/+4 face down, or take them.`;
+      else if (myTurn()) s = S.drawnCard != null ? '<b>Play the card you drew</b> (glowing) or hit Keep & pass.' : '<b>Your turn!</b> Play a card, bluff with a Liar\'s card, or draw.';
       else s = `Waiting for <b>${esc(pName(S.turnId))}</b>...`;
     } else if (S.phase === 'handover') s = 'Hand over! 🎉 <button class="btn red" id="reopenBtn" type="button">Next hand →</button>';
     $('#status').innerHTML = s;
@@ -678,6 +690,7 @@
     const unoOk = inHand && S.phase !== 'handover' && !m.calledUno &&
       (S.hand.length === 1 || (S.hand.length === 2 && myTurn()));
     $('#drawBtn').disabled = !(myTurn() && S.drawnCard == null);
+    $('#drawBtn').textContent = myTurn() && stackOn() ? `😩 Take +${S.drawStack}` : 'Draw';
     $('#passBtn').classList.toggle('hidden', !(myTurn() && S.drawnCard != null));
     $('#unoBtn').disabled = !unoOk;
     $('#unoBtn').classList.toggle('pulse', unoOk);
@@ -693,6 +706,7 @@
       let cls = '';
       if (myTurn()) {
         if (S.drawnCard != null) cls = c.id === S.drawnCard ? 'playable' : 'dim';
+        else if (stackOn()) cls = c.liar ? 'playable' : 'dim';
         else cls = c.liar || matches(c) ? 'playable' : 'dim';
       } else if (wlcPick) cls = 'selectable' + (c.id === wlcSelected ? ' selected' : '');
       if (fresh.has(c.id)) cls += ' fresh';
@@ -749,6 +763,7 @@
     if (!myTurn()) { alertToast(S.phase === 'play' ? `Hold your horses, it's ${pName(S.turnId)}'s turn.` : 'Not right now!'); return; }
     if (S.drawnCard != null && card.id !== S.drawnCard) { alertToast('After drawing you can only play the card you just drew, or pass.'); return; }
     if (card.liar) return openClaimPicker(card);
+    if (stackOn()) { alertToast(`+${S.drawStack} is coming! Only Liar's cards can stack (as a +2 or +4). Or hit Take +${S.drawStack}.`); return; }
     if (!matches(card)) { el.style.animation = 'shake .35s'; alertToast(`That doesn't match. You need ${cap(S.currentColor)} or a ${S.topValue && (NAMES[S.topValue] || S.topValue)}.`); return; }
     if (card.value === 'wlc') return openColorPicker('Wild Liar\'s Challenge: pick a color', (color) => socket.emit('play', { cardId: card.id, color }));
     if (card.value === '7') return withTarget((target) => socket.emit('play', { cardId: card.id, target }));
@@ -875,6 +890,27 @@
         ${claim.value === 'wd4' ? `style="background:#1a1a1a;border-color:var(--${claim.color})"` : ''}
         data-claim="${claim.color}|${claim.value}" type="button" title="${esc(label(claim))}">${txt}</button>`;
     };
+    if (stackOn()) {
+      const twos = COLORS.map((c) => chipBtn({ color: c, value: 'draw2' })).join('');
+      const fours = COLORS.map((c) => chipBtn({ color: c, value: 'wd4' })).join('');
+      const real = card.value === 'draw2' || card.value === 'wd4';
+      openModal('claim', `
+        <h2>🔥 Stack it! (+${S.drawStack} so far)</h2>
+        <div style="display:flex;gap:14px;align-items:center;margin-top:8px">${cardHTML(card)}
+          <p>${real ? 'This really is one, so you can stack for real (marked <b>✓ truth</b>).' : '<b style="color:var(--gold)">This isn\'t a +2 or +4.</b> Bluff it... but if they catch you, you eat the whole stack plus 1!'}</p></div>
+        <div class="sec">Say it's a Draw Two (+2, any color)</div><div class="claim-grid">${twos}</div>
+        <div class="sec">Or a Wild Draw 4 (+4, pick the new color)</div><div class="claim-grid">${fours}</div>
+        <div class="modal-foot"><button class="btn ghost" data-close type="button">Cancel</button></div>`);
+      $('#modalCard').onclick = (e) => {
+        if (e.target.closest('[data-close]')) return closeModal();
+        const b = e.target.closest('[data-claim]');
+        if (!b) return;
+        const [color, value] = b.dataset.claim.split('|');
+        closeModal();
+        socket.emit('play', { cardId: card.id, claim: { color, value } });
+      };
+      return;
+    }
     const sameColor = [...NUMBERS, ...ACTIONS].map((v) => chipBtn({ color: cc, value: v })).join('');
     const sameSymbol = [...NUMBERS, ...ACTIONS].includes(tv)
       ? COLORS.filter((c) => c !== cc).map((c) => chipBtn({ color: c, value: tv })).join('') : '';

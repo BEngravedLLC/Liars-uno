@@ -99,6 +99,7 @@
             <span class="deck-count" id="deckCount"></span>
           </button>
           <div id="discard" class="pile"></div>
+          <div id="stackBadge" class="stack-badge hidden"></div>
           <div class="color-chip" id="colorLabel"></div>
         </div>
 
@@ -153,7 +154,7 @@
 
       <h4>Two kinds of cards</h4>
       <p><b>Regular cards</b> are always played <b>face up</b>. They must match the pile by color, number or symbol.</p>
-      <p><b>Liar's cards</b> (the ones with the white ring <span class="ring"></span> in the corner) are always played <b>face down</b>, and you say what they are.</p>
+      <p><b>Liar's cards</b> have <b>white circles in the corners</b>, a dashed white frame and a little "LIAR'S" tag. They're always played <b>face down</b>, and you say what they are.</p>
 
       <h4>Playing a Liar's card</h4>
       <p>If it matches, tell the truth. If it doesn't, <b>lie</b>, but make it believable: it has to be a card of the pile's color, the same number or symbol, or a Wild Draw 4.</p>
@@ -171,9 +172,13 @@
       <ul>
         <li><b>Skip</b>: next player loses their turn.</li>
         <li><b>Reverse</b>: flips direction (with 2 players it works like a Skip).</li>
-        <li><b>Draw Two</b>: next player draws 2 and loses their turn.</li>
-        <li><b>Wild Draw 4</b>: playable on anything. Next player draws 4 and loses their turn. You pick the color.</li>
+        <li><b>Draw Two</b>: next player must stack or take 2 (see below).</li>
+        <li><b>Wild Draw 4</b>: playable on anything. You pick the color, and the next player must stack or take 4.</li>
       </ul>
+
+      <h4>🔥 Stacking (house rule)</h4>
+      <p>When a +2 or +4 hits you, you can <b>stack</b> another +2 or +4 on it (any color) and pass the whole pile to the next player. Or hit <b>Take</b> to draw them all and lose your turn.</p>
+      <p>Stacks are played face down, so you can <b>bluff a stack</b> with any Liar's card. Get caught and you <b>eat the whole stack plus 1</b>. Call a real stack a bluff and you draw 1, and the stack keeps going.</p>
 
       <h4>Wild Liar's Challenge (played face up)</h4>
       <p>You pick a color. Everyone else puts one card face down and says it's that color (wilds don't count). No card of that color? Put anything down and bluff.</p>

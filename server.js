@@ -86,7 +86,7 @@ function getRoom(code) {
       deck: [], discard: [], order: [], turn: 0, dir: 1, dealer: -1,
       currentColor: null, topValue: null, pending: null, wlc: null,
       drawnCard: null, result: null, handNum: 0, chat: [], matchWinner: null,
-      turnStarted: Date.now(), emptySince: null, seq: 0,
+      turnStarted: Date.now(), emptySince: null, seq: 0, drawStack: 0,
     });
   }
   return rooms.get(code);
@@ -201,6 +201,7 @@ function startHand(room) {
     break;
   }
   room.dir = 1;
+  room.drawStack = 0;
   room.turn = (room.dealer + 1) % n;
   room.phase = 'play';
   room.pending = null;
@@ -218,6 +219,7 @@ function endHand(room, winners) {
   const pts = losers.reduce((s, p) => s + p.hand.reduce((a, c) => a + cardPoints(c), 0), 0);
   winners.forEach((w) => { w.score += pts; w.wins = (w.wins || 0) + 1; });
   room.phase = 'handover';
+  room.drawStack = 0;
   room.pending = null;
   room.wlc = null;
   room.drawnCard = null;
@@ -260,15 +262,14 @@ function applyEffect(room, pl, value, target) {
       sys(room, '🔃 Direction reversed!');
       return 1;
     case 'draw2':
-      fx(room, { t: 'big', kind: 'draw2', target: nextP.id });
-      drawCards(room, nextP, 2);
-      sys(room, `➕ ${nextP.name} draws 2 and loses their turn.`);
-      return 2;
-    case 'wd4':
-      fx(room, { t: 'big', kind: 'wd4', target: nextP.id, color: room.currentColor });
-      drawCards(room, nextP, 4);
-      sys(room, `💥 ${nextP.name} draws 4 and loses their turn. Color is now ${cap(room.currentColor)}.`);
-      return 2;
+    case 'wd4': {
+      // House rule: draw cards stack. The next player can pass it on with another +2/+4, or take the whole pile.
+      const add = value === 'draw2' ? 2 : 4;
+      room.drawStack += add;
+      fx(room, { t: 'big', kind: 'stack', add, total: room.drawStack, target: nextP.id, color: value === 'wd4' ? room.currentColor : null });
+      sys(room, `${add === 2 ? '➕' : '💥'} ${nextP.name} is facing +${room.drawStack}! Stack a +2/+4 or take them.${value === 'wd4' ? ` Color is now ${cap(room.currentColor)}.` : ''}`);
+      return 1;
+    }
     case '7': {
       const t = byId(room, target);
       if (t && t !== pl) {
@@ -304,10 +305,12 @@ function resolveChallenge(room, challenger) {
 
   if (challenger && !truth) {
     room.discard.pop();
-    fx(room, { t: 'big', kind: 'busted', target: pl.id, by: challenger.id, card: pd.card });
+    const eat = room.drawStack;
+    room.drawStack = 0;
+    fx(room, { t: 'big', kind: 'busted', target: pl.id, by: challenger.id, card: pd.card, eat });
     pl.hand.push(pd.card);
-    drawCards(room, pl, 1);
-    sys(room, `🚨 BUSTED! ${challenger.name} called it — ${pl.name}'s card was really a ${label(pd.card)}. ${pl.name} takes it back and draws 1.`);
+    drawCards(room, pl, 1 + eat);
+    sys(room, `🚨 BUSTED! ${challenger.name} called it — ${pl.name}'s card was really a ${label(pd.card)}. ${pl.name} takes it back and draws ${1 + eat}${eat ? ` (that includes the +${eat} stack!)` : ''}.`);
     advanceFrom(room, pl, 1);
     return;
   }
@@ -335,6 +338,15 @@ function checkAllResponded(room) {
   if (!pd) return;
   const others = room.order.filter((id) => id !== pd.playerId).map((id) => byId(room, id));
   if (others.every((p) => pd.responded.has(p.id) || !p.connected)) resolveChallenge(room, null);
+}
+
+function takeStack(room, p) {
+  const n = room.drawStack;
+  room.drawStack = 0;
+  fx(room, { t: 'big', kind: 'ouch', target: p.id, n });
+  drawCards(room, p, n);
+  sys(room, `😩 ${p.name} takes the +${n} and loses their turn.`);
+  advanceFrom(room, p, 1);
 }
 
 // ---------- Wild Liar's Challenge ----------
@@ -415,6 +427,7 @@ function view(room, me) {
     topValue: room.topValue,
     dir: room.dir,
     deckCount: room.deck.length,
+    drawStack: room.drawStack,
     turnId: playing ? room.order[room.turn] : null,
     drawnCard: room.drawnCard,
     handNum: room.handNum,
@@ -485,6 +498,8 @@ const actions = {
     if (!card) return "You don't have that card.";
     if (room.drawnCard != null && room.drawnCard !== cardId) return 'After drawing, you can only play the card you just drew (or pass).';
     clearExposures(room, me.id);
+    const stacking = room.drawStack > 0;
+    if (stacking && !card.liar) return `+${room.drawStack} is coming at you! Stack a +2 or +4 (they're Liar's cards, played face down), or take the cards.`;
 
     if (!card.liar) {
       if (!canMatch(room, card)) return "That card doesn't match the pile.";
@@ -517,7 +532,8 @@ const actions = {
     // Liar's card: face down with a claim
     if (!validClaim(claim)) return 'Pick what you are saying the card is.';
     const c = { color: claim.color, value: claim.value };
-    if (!plausible(room, c)) return "That claim doesn't match the pile, so nobody would buy it. Pick something believable!";
+    if (stacking && !['draw2', 'wd4'].includes(c.value)) return 'To stack, say your card is a Draw Two or a Wild Draw 4.';
+    if (!stacking && !plausible(room, c)) return "That claim doesn't match the pile, so nobody would buy it. Pick something believable!";
     let tgt = null;
     if (c.value === '7') {
       tgt = pickTarget(room, me, target);
@@ -539,6 +555,7 @@ const actions = {
     if (curPlayer(room) !== me) return "It's not your turn.";
     if (room.drawnCard != null) return 'You already drew. Play that card or pass.';
     clearExposures(room, me.id);
+    if (room.drawStack > 0) return takeStack(room, me);
     const [c] = drawCards(room, me, 1);
     if (!c) { sys(room, `${me.name} tried to draw but the deck is empty. Turn passes.`); advanceFrom(room, me, 1); return; }
     if (c.liar || canMatch(room, c)) {
@@ -557,6 +574,12 @@ const actions = {
     if (room.drawnCard == null) return 'Draw a card first.';
     sys(room, `${me.name} keeps the card and passes.`);
     advanceFrom(room, me, 1);
+  },
+
+  takeStack(room, me) {
+    if (room.phase !== 'play' || curPlayer(room) !== me || room.drawStack <= 0) return;
+    clearExposures(room, me.id);
+    takeStack(room, me);
   },
 
   challenge(room, me) {
@@ -758,9 +781,12 @@ setInterval(() => {
     if (room.phase === 'play') {
       const cp = curPlayer(room);
       if (offlineLong(cp) && now - room.turnStarted > OFFLINE_AUTOPLAY_SECONDS * 1000) {
-        if (room.drawnCard == null) drawCards(room, cp, 1);
-        sys(room, `🤖 ${cp.name} is offline, so they draw and pass.`);
-        advanceFrom(room, cp, 1); changed = true;
+        if (room.drawStack > 0) { sys(room, `🤖 ${cp.name} is offline.`); takeStack(room, cp); changed = true; }
+        else {
+          if (room.drawnCard == null) drawCards(room, cp, 1);
+          sys(room, `🤖 ${cp.name} is offline, so they draw and pass.`);
+          advanceFrom(room, cp, 1); changed = true;
+        }
       }
     }
     if (room.phase === 'wlc-submit' && room.wlc) {
