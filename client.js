@@ -702,6 +702,7 @@
     const wlcPick = mustSubmit(S);
     const newDeal = S.handNum !== prevHandNum;
     const fresh = new Set(prevHandIds && !newDeal ? hand.filter((c) => !prevHandIds.has(c.id)).map((c) => c.id) : newDeal && S.phase !== 'lobby' ? hand.map((c) => c.id) : []);
+    const keepScroll = $('#hand').scrollLeft;
     $('#hand').innerHTML = hand.length ? hand.map((c) => {
       let cls = '';
       if (myTurn()) {
@@ -713,6 +714,8 @@
       return cardHTML(c, cls);
     }).join('') : (S.phase === 'lobby' ? '<p class="hint">Your cards will show up here.</p>' : !m.inHand ? '<p class="hint">You\'ll be dealt in next hand. Grab a snack. 🍿</p>' : '');
     layoutHand(fresh, newDeal);
+    $('#hand').scrollLeft = keepScroll;
+    updateHandArrows();
     prevHandIds = new Set(hand.map((c) => c.id));
     prevHandNum = S.handNum;
   }
@@ -722,17 +725,33 @@
     const cards = [...$('#hand').querySelectorAll('.card')];
     const n = cards.length;
     if (!n) return;
-    const W = $('#hand').clientWidth - 20;
+    const hand = $('#hand');
+    const W = hand.clientWidth - 24;
     const cw = cards[0].offsetWidth;
-    let gap = n > 1 ? (W - n * cw) / (n - 1) : 0;
-    gap = Math.max(-cw * 0.86, Math.min(gap, 4));
-    const step = Math.min(5, 44 / n);
-    const drop = Math.min(16, n * 2);
+    // Squeeze cards together, but always leave each card's corner showing.
+    // If they still don't fit, the hand scrolls sideways instead.
+    const minShow = cw * 0.44;
+    // The curve pushes the outer cards outward, so leave room for that
+    const ch = cards[0].offsetHeight;
+    let half = Math.min(12, n * 1.6);
+    const spill = ch * 1.15 * Math.sin(half * Math.PI / 180);
+    const Wfit = W - 2 * spill;
+    let gap = n > 1 ? (Wfit - n * cw) / (n - 1) : 0;
+    gap = Math.max(-(cw - minShow), Math.min(gap, 4));
+    const overflow = cw + (n - 1) * (cw + gap) > Wfit + 1;
+    hand.classList.toggle('scrolling', overflow);
+    if (overflow) {
+      half = 0;
+      gap = Math.max(-(cw - minShow), Math.min((W - n * cw) / (n - 1), 4));
+    }
+    const step = n > 1 ? (2 * half) / (n - 1) : 0;
+    const drop = overflow ? 0 : Math.min(16, n * 2);
     const deck = $('#drawPile .s1');
     const dc = deck && !$('#center').classList.contains('hidden') ? centerOf(deck) : null;
     let k = 0;
     cards.forEach((el, i) => {
-      if (i) el.style.marginLeft = gap + 'px';
+      el.style.marginLeft = i ? gap + 'px' : 'auto';
+      el.style.marginRight = i === n - 1 ? 'auto' : '0';
       const t = n > 1 ? (i / (n - 1)) * 2 - 1 : 0;
       el.style.setProperty('--r', (i - (n - 1) / 2) * step + 'deg');
       el.style.setProperty('--y', t * t * drop + 'px');
@@ -748,6 +767,23 @@
       }
     });
   }
+
+  // Scrolling a big hand: arrows, mouse wheel, swipe
+  function updateHandArrows() {
+    const h = $('#hand');
+    const can = h.scrollWidth > h.clientWidth + 2;
+    $('#handLeft').classList.toggle('hidden', !can || h.scrollLeft <= 2);
+    $('#handRight').classList.toggle('hidden', !can || h.scrollLeft >= h.scrollWidth - h.clientWidth - 2);
+  }
+  $('#hand').addEventListener('scroll', updateHandArrows, { passive: true });
+  $('#hand').addEventListener('wheel', (e) => {
+    const h = $('#hand');
+    if (h.scrollWidth <= h.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    h.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+  $('#handLeft').onclick = () => $('#hand').scrollBy({ left: -$('#hand').clientWidth * 0.7, behavior: 'smooth' });
+  $('#handRight').onclick = () => $('#hand').scrollBy({ left: $('#hand').clientWidth * 0.7, behavior: 'smooth' });
 
   $('#hand').addEventListener('click', (e) => {
     const el = e.target.closest('.card');

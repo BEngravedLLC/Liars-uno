@@ -109,7 +109,11 @@
 
         <section class="me" id="meArea">
           <div class="me-seat" id="meName" title="Tap your picture to change it"></div>
-          <div id="hand" class="hand"></div>
+          <div class="hand-wrap">
+            <button id="handLeft" class="hand-arrow left hidden" type="button" aria-label="Scroll cards left">◀</button>
+            <div id="hand" class="hand"></div>
+            <button id="handRight" class="hand-arrow right hidden" type="button" aria-label="Scroll cards right">▶</button>
+          </div>
           <div class="me-buttons">
             <button class="btn" id="drawBtn" type="button">Draw</button>
             <button class="btn" id="passBtn" type="button">Keep & pass</button>
