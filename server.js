@@ -86,7 +86,7 @@ function getRoom(code) {
       deck: [], discard: [], order: [], turn: 0, dir: 1, dealer: -1,
       currentColor: null, topValue: null, pending: null, wlc: null,
       drawnCard: null, result: null, handNum: 0, chat: [], matchWinner: null,
-      turnStarted: Date.now(), emptySince: null,
+      turnStarted: Date.now(), emptySince: null, seq: 0,
     });
   }
   return rooms.get(code);
@@ -107,6 +107,14 @@ function sys(room, text) {
   io.to(room.code).emit('chat', msg);
 }
 
+// Animation cues for every browser at the table
+function fx(room, data) { io.to(room.code).emit('fx', data); }
+function pushDiscard(room, entry, pid) {
+  entry.seq = ++room.seq;
+  entry.pid = pid || null;
+  room.discard.push(entry);
+}
+
 function drawCards(room, p, n) {
   const got = [];
   for (let i = 0; i < n; i++) {
@@ -116,6 +124,7 @@ function drawCards(room, p, n) {
     p.hand.push(c);
     got.push(c);
   }
+  if (got.length) fx(room, { t: 'draw', pid: p.id, n: got.length });
   return got;
 }
 
@@ -186,7 +195,7 @@ function startHand(room) {
   for (;;) {
     const c = room.deck.pop();
     if (ACTIONS.includes(c.value) || c.value === 'wd4' || c.value === 'wlc') { room.deck.unshift(c); continue; }
-    room.discard.push({ card: c, faceDown: false });
+    pushDiscard(room, { card: c, faceDown: false });
     room.currentColor = c.color;
     room.topValue = c.value;
     break;
@@ -200,6 +209,7 @@ function startHand(room) {
   room.result = null;
   room.turnStarted = Date.now();
   room.handNum++;
+  fx(room, { t: 'deal' });
   sys(room, `🎴 Hand #${room.handNum}: ${room.players[room.dealer].name} deals. ${curPlayer(room).name} goes first.`);
 }
 
@@ -217,6 +227,7 @@ function endHand(room, winners) {
     points: pts,
     hands: losers.map((p) => ({ name: p.name, cards: p.hand })),
   };
+  fx(room, { t: 'win', ids: winners.map((w) => w.id) });
   const names = winners.map((w) => w.name).join(' & ');
   sys(room, `🏆 ${names} won the hand${winners.length > 1 ? ' together' : ''} and ${winners.length > 1 ? 'each score' : 'scores'} ${pts} points!`);
   const top = Math.max(...room.players.map((p) => p.score));
@@ -239,18 +250,22 @@ function applyEffect(room, pl, value, target) {
   const nextP = byId(room, room.order[idxAfter(room, idx, 1)]);
   switch (value) {
     case 'skip':
+      fx(room, { t: 'big', kind: 'skip', target: nextP.id });
       sys(room, `⛔ ${nextP.name} is skipped.`);
       return 2;
     case 'reverse':
+      fx(room, { t: 'big', kind: 'reverse', target: n === 2 ? nextP.id : null });
       if (n === 2) { sys(room, `🔃 Reverse! With two players that means ${nextP.name} is skipped.`); return 2; }
       room.dir *= -1;
       sys(room, '🔃 Direction reversed!');
       return 1;
     case 'draw2':
+      fx(room, { t: 'big', kind: 'draw2', target: nextP.id });
       drawCards(room, nextP, 2);
       sys(room, `➕ ${nextP.name} draws 2 and loses their turn.`);
       return 2;
     case 'wd4':
+      fx(room, { t: 'big', kind: 'wd4', target: nextP.id, color: room.currentColor });
       drawCards(room, nextP, 4);
       sys(room, `💥 ${nextP.name} draws 4 and loses their turn. Color is now ${cap(room.currentColor)}.`);
       return 2;
@@ -259,6 +274,7 @@ function applyEffect(room, pl, value, target) {
       if (t && t !== pl) {
         [pl.hand, t.hand] = [t.hand, pl.hand];
         resetUno(pl, t);
+        fx(room, { t: 'big', kind: 'swap', a: pl.id, b: t.id });
         sys(room, `🔄 Seven swap! ${pl.name} trades hands with ${t.name}.`);
       }
       return 1;
@@ -268,6 +284,7 @@ function applyEffect(room, pl, value, target) {
       const hands = ps.map((p) => p.hand);
       ps.forEach((p, i) => { ps[idxAfter(room, i, 1)].hand = hands[i]; });
       resetUno(...ps);
+      fx(room, { t: 'big', kind: 'zero' });
       sys(room, '🔁 Zero pass! Everyone hands their cards to the next player.');
       return 1;
     }
@@ -287,6 +304,7 @@ function resolveChallenge(room, challenger) {
 
   if (challenger && !truth) {
     room.discard.pop();
+    fx(room, { t: 'big', kind: 'busted', target: pl.id, by: challenger.id, card: pd.card });
     pl.hand.push(pd.card);
     drawCards(room, pl, 1);
     sys(room, `🚨 BUSTED! ${challenger.name} called it — ${pl.name}'s card was really a ${label(pd.card)}. ${pl.name} takes it back and draws 1.`);
@@ -295,6 +313,7 @@ function resolveChallenge(room, challenger) {
   }
   if (challenger) {
     top.revealed = true;
+    fx(room, { t: 'big', kind: 'truth', target: pl.id, by: challenger.id });
     sys(room, `😇 ${pl.name} was telling the truth — it really is a ${label(pd.claim)}! ${challenger.name} draws 1 for doubting.`);
   } else {
     sys(room, `🤐 Nobody called it. The ${label(pd.claim)} stands.`);
@@ -322,6 +341,7 @@ function checkAllResponded(room) {
 function startWLC(room, pl, color) {
   room.phase = 'wlc-submit';
   room.wlc = { playerId: pl.id, color, subs: {}, revealed: {}, deadline: Date.now() + WLC_SUBMIT_SECONDS * 1000 };
+  fx(room, { t: 'big', kind: 'wlc', color, target: pl.id });
   sys(room, `🃏 ${pl.name} plays a WILD LIAR'S CHALLENGE and calls ${cap(color).toUpperCase()}! Everyone else: put a ${color} card face down... or bluff.`);
 }
 
@@ -342,7 +362,7 @@ function finishWLC(room) {
   for (const [pid, s] of Object.entries(w.subs)) {
     const rv = w.revealed[pid];
     if (rv && !rv.truth) continue; // liar already took it back
-    room.discard.splice(room.discard.length - 1, 0, { card: s.card, faceDown: true, claim: s.claim });
+    room.discard.splice(room.discard.length - 1, 0, { card: s.card, faceDown: true, claim: s.claim, seq: ++room.seq, pid });
     const p = byId(room, pid);
     if (p) { discarders.push(p.name); markExposure(p); }
   }
@@ -388,6 +408,9 @@ function view(room, me) {
     })),
     hand: me.hand,
     top: topView,
+    topSeq: top ? top.seq : 0,
+    topPid: top ? top.pid : null,
+    pile: room.discard.slice(-5, -1).map((e) => (e.faceDown && !e.revealed ? { seq: e.seq, back: true } : { seq: e.seq, card: e.card })),
     currentColor: room.currentColor,
     topValue: room.topValue,
     dir: room.dir,
@@ -472,7 +495,8 @@ const actions = {
         if (!tgt) return 'Pick who to swap hands with.';
       }
       me.hand = me.hand.filter((c) => c !== card);
-      room.discard.push({ card, faceDown: false });
+      pushDiscard(room, { card, faceDown: false }, me.id);
+      fx(room, { t: 'play', pid: me.id });
       room.drawnCard = null;
       markExposure(me);
       if (card.value === 'wlc') {
@@ -500,7 +524,8 @@ const actions = {
       if (!tgt) return 'Pick who to swap hands with.';
     }
     me.hand = me.hand.filter((x) => x !== card);
-    room.discard.push({ card, faceDown: true, claim: c });
+    pushDiscard(room, { card, faceDown: true, claim: c }, me.id);
+    fx(room, { t: 'play', pid: me.id, faceDown: true });
     room.drawnCard = null;
     markExposure(me);
     room.phase = 'challenge';
@@ -557,6 +582,7 @@ const actions = {
     if (me.calledUno) return;
     me.calledUno = true;
     me.exposed = false;
+    fx(room, { t: 'big', kind: 'uno', target: me.id });
     sys(room, `📣 ${me.name} yells "UNO!"`);
   },
 
@@ -567,6 +593,7 @@ const actions = {
     if (t.exposed && t.hand.length === 1 && !t.calledUno) {
       drawCards(room, t, 2);
       t.exposed = false;
+      fx(room, { t: 'big', kind: 'caught', target: t.id, by: me.id });
       sys(room, `🎯 ${me.name} caught ${t.name} forgetting to say UNO! ${t.name} draws 2.`);
     } else return 'Too late, or they already called it!';
   },
@@ -591,11 +618,13 @@ const actions = {
     const truth = s.card.color === w.color;
     w.revealed[targetId] = { card: s.card, truth };
     if (!truth) {
+      fx(room, { t: 'big', kind: 'busted', target: t.id, by: me.id, card: s.card });
       t.hand.push(s.card);
       drawCards(room, t, 1);
       sys(room, `🚨 ${t.name} was bluffing! It was really a ${label(s.card)}. Back in the hand, plus 1 card.`);
       if (Object.keys(w.subs).every((id) => w.revealed[id])) finishWLC(room);
     } else {
+      fx(room, { t: 'big', kind: 'truth', target: t.id, by: me.id });
       sys(room, `😇 ${t.name} really had a ${w.color} card. Challenge over!`);
       finishWLC(room);
     }

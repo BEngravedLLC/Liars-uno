@@ -56,46 +56,68 @@
       <div class="chips">
         <span class="chip" id="roomChip">Room</span>
         <span class="chip" id="handChip"></span>
-        <button class="chip btnchip" id="inviteBtn" type="button">🔗 Copy invite link</button>
+        <button class="chip btnchip" id="inviteBtn" type="button">🔗 <span class="long">Copy invite link</span><span class="short">Invite</span></button>
       </div>
+      <div id="turnPill" class="turn-pill hidden"></div>
       <div class="top-actions">
-        <button class="btn ghost" id="rulesBtn" type="button">📖 Rule book</button>
+        <button class="btn ghost icon" id="muteBtn" type="button" title="Sound on/off">🔊</button>
+        <button class="btn ghost" id="rulesBtn" type="button">📖 Rules</button>
         <button class="btn ghost" id="sideBtn" type="button">💬 Chat & scores</button>
       </div>
     </header>
 
     <div class="layout">
-      <main class="table">
-        <section id="seats" class="seats"></section>
+      <main class="arena" id="arena">
+        <div class="arena-bg"></div>
+        <div class="rays"></div>
+        <div class="floor-ring"></div>
+        <div class="shards" id="shards"></div>
+        <div class="my-turn-glow"></div>
 
-        <section class="middle">
-          <div id="lobbyBox" class="lobby hidden"></div>
-          <div id="pileBox" class="piles">
-            <div class="pile-wrap">
-              <button id="drawPile" class="card back" type="button" aria-label="Draw a card"><span>LIAR'S</span></button>
-              <div class="pile-label" id="deckCount"></div>
-            </div>
-            <div class="pile-wrap">
-              <div id="discard"></div>
-              <div class="pile-label" id="colorLabel"></div>
-            </div>
-            <div id="dirBox" class="dir"></div>
-          </div>
-          <div id="status" class="status"></div>
-          <div id="actionPanel" class="action-panel hidden"></div>
-        </section>
+        <section id="seats"></section>
 
-        <section class="me">
-          <div class="me-bar">
-            <div class="me-name" id="meName" title="Tap your picture to change it"></div>
-            <div class="me-buttons">
-              <button class="btn" id="drawBtn" type="button">Draw</button>
-              <button class="btn" id="passBtn" type="button">Keep & pass</button>
-              <button class="btn uno" id="unoBtn" type="button">UNO!</button>
-            </div>
+        <div class="center" id="center">
+          <div class="color-glow" id="colorGlow"></div>
+          <div class="dir-ring" id="dirRing">
+            <svg viewBox="0 0 200 200" aria-hidden="true">
+              <defs>
+                <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#fff6d6" stop-opacity=".95"/>
+                  <stop offset="1" stop-color="#ffd257" stop-opacity=".35"/>
+                </linearGradient>
+              </defs>
+              <circle cx="100" cy="100" r="88" fill="none" stroke="url(#ringGrad)" stroke-width="7" stroke-dasharray="120 64" stroke-linecap="round"/>
+              <path d="M188 92 l14 14 -20 4z M44 176 l-2 20 -14 -14z M24 36 l20 -2 -6 20z" fill="#fff6d6"/>
+            </svg>
           </div>
+          <div class="pointer" id="pointer"><i></i></div>
+          <button id="drawPile" class="deck" type="button" aria-label="Draw a card">
+            <span class="card back s3"><span>LIAR'S</span></span>
+            <span class="card back s2"><span>LIAR'S</span></span>
+            <span class="card back s1"><span>LIAR'S</span></span>
+            <span class="deck-tag" id="deckTag">DRAW</span>
+            <span class="deck-count" id="deckCount"></span>
+          </button>
+          <div id="discard" class="pile"></div>
+          <div class="color-chip" id="colorLabel"></div>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div id="lobbyBox" class="lobby hidden"></div>
+        <div id="actionPanel" class="action-panel hidden"></div>
+
+        <section class="me" id="meArea">
+          <div class="me-seat" id="meName" title="Tap your picture to change it"></div>
           <div id="hand" class="hand"></div>
+          <div class="me-buttons">
+            <button class="btn" id="drawBtn" type="button">Draw</button>
+            <button class="btn" id="passBtn" type="button">Keep & pass</button>
+            <button class="btn uno" id="unoBtn" type="button">UNO!</button>
+          </div>
         </section>
+
+        <div id="bigfx" class="bigfx"></div>
+        <div id="flyLayer" class="fly-layer"></div>
       </main>
 
       <aside id="side" class="side">

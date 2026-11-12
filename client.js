@@ -187,7 +187,7 @@
     photoForGame = false;
   });
   $('#meName').addEventListener('click', (e) => {
-    if (!e.target.closest('.me-av')) return;
+    if (!e.target.closest('.frame')) return;
     photoForGame = true;
     pickPhoto();
   });
@@ -247,11 +247,12 @@
   const valOrder = (v) => (NUMBERS.includes(v) ? Number(v) : { skip: 10, reverse: 11, draw2: 12, wd4: 13, wlc: 14 }[v]);
   const sortHand = (h) => [...h].sort((a, b) => (colorOrder[a.color] - colorOrder[b.color]) || (valOrder(a.value) - valOrder(b.value)) || (a.liar - b.liar));
 
-  function avatarHTML(p, extra = '') {
-    const color = AVATAR_COLORS[Math.max(0, S.players.findIndex((x) => x.id === p.id)) % AVATAR_COLORS.length];
-    const img = AVATARS[p.id];
-    return `<div class="avatar ${extra}" style="background:${color}">${img ? `<img src="${img}" alt="">` : esc(p.name[0].toUpperCase())}</div>`;
+  const colorOf = (id) => AVATAR_COLORS[Math.max(0, S.players.findIndex((x) => x.id === id)) % AVATAR_COLORS.length];
+  const avInner = (p) => (AVATARS[p.id] ? `<img src="${AVATARS[p.id]}" alt="">` : esc(p.name[0].toUpperCase()));
+  function frameHTML(p, turn) {
+    return `<div class="frame ${turn ? 'turn' : ''} ${p.connected ? '' : 'offline'}"><div class="av" style="background:${colorOf(p.id)}">${avInner(p)}</div></div>`;
   }
+  const miniAv = (p) => `<span class="mini-av" style="background:${colorOf(p.id)}">${avInner(p)}</span>`;
 
   // ================= Helpers about state =================
   const me = () => S.players.find((p) => p.id === S.me);
@@ -260,6 +261,9 @@
   const playersInHand = () => S.players.filter((p) => p.inHand);
   const matches = (c) => c.value === 'wd4' || c.value === 'wlc' || c.color === S.currentColor || c.value === S.topValue;
   const isTruth = (card, claim) => card.value === claim.value && (card.value === 'wd4' || card.color === claim.color);
+  const isMine = (st) => st && st.turnId === st.me && st.phase === 'play';
+  const mustSubmit = (st) => st && st.phase === 'wlc-submit' && st.wlc && st.wlc.playerId !== st.me && !st.wlc.claims[st.me] && (st.players.find((p) => p.id === st.me) || {}).inHand;
+  const canCall = (st) => st && st.phase === 'challenge' && st.pending && st.pending.playerId !== st.me && !st.pending.responded.includes(st.me) && (st.players.find((p) => p.id === st.me) || {}).inHand;
 
   // ================= Timers =================
   let pendingEnd = 0, pendingTotal = 10000, wlcEnd = 0;
@@ -270,10 +274,189 @@
     if (S.phase === 'wlc-submit') bar.style.width = Math.max(0, (wlcEnd - Date.now()) / 60000 * 100) + '%';
   }, 150);
 
+  // ================= Sound (made in the browser, no files needed) =================
+  let muted = store.get('luno_muted') === '1';
+  let actx = null;
+  function ac() {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function tone(freq, start, dur, type = 'sine', vol = 0.15) {
+    const a = ac(), t = a.currentTime + start;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(a.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function noise(start, dur, vol = 0.2, freq = 2000) {
+    const a = ac(), t = a.currentTime + start;
+    const buf = a.createBuffer(1, Math.max(1, Math.floor(a.sampleRate * dur)), a.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    src.buffer = buf; f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 0.8; g.gain.value = vol;
+    src.connect(f).connect(g).connect(a.destination);
+    src.start(t);
+  }
+  const SFX = {
+    flip: () => noise(0, 0.09, 0.35, 2600),
+    draw: () => noise(0, 0.2, 0.18, 900),
+    deal: () => { for (let i = 0; i < 7; i++) noise(i * 0.09, 0.06, 0.2, 2600); },
+    turn: () => { tone(660, 0, 0.2, 'triangle', 0.22); tone(990, 0.14, 0.4, 'triangle', 0.22); },
+    alert: () => { tone(880, 0, 0.1, 'square', 0.05); tone(1175, 0.13, 0.14, 'square', 0.05); },
+    busted: () => { tone(160, 0, 0.5, 'sawtooth', 0.12); tone(120, 0.06, 0.5, 'sawtooth', 0.1); },
+    truth: () => { tone(1046, 0, 0.55, 'sine', 0.18); tone(1568, 0.08, 0.6, 'sine', 0.1); },
+    uno: () => { [523, 659, 784, 1046].forEach((f, i) => tone(f, i * 0.09, 0.2, 'square', 0.07)); },
+    whoosh: () => noise(0, 0.35, 0.18, 500),
+    win: () => { [523, 659, 784, 1046, 784, 1046, 1318].forEach((f, i) => tone(f, i * 0.12, 0.3, 'triangle', 0.16)); },
+  };
+  function sound(name) { if (muted || !SFX[name]) return; try { SFX[name](); } catch {} }
+  function setMuteIcon() { $('#muteBtn').textContent = muted ? '🔇' : '🔊'; }
+  setMuteIcon();
+  $('#muteBtn').onclick = () => { muted = !muted; store.set('luno_muted', muted ? '1' : '0'); setMuteIcon(); if (!muted) sound('alert'); };
+
+  // ================= Tab title flash when it's your turn =================
+  const baseTitle = document.title;
+  let titleFlip = false;
+  setInterval(() => {
+    const needs = S && (myTurn() || mustSubmit(S));
+    if (needs && document.hidden) { titleFlip = !titleFlip; document.title = titleFlip ? '🟡 YOUR TURN! 🟡' : baseTitle; }
+    else if (document.title !== baseTitle) document.title = baseTitle;
+  }, 900);
+
+  // ================= Positions & flying cards =================
+  const arena = () => $('#arena');
+  function centerOf(el) {
+    const a = arena().getBoundingClientRect(), r = el.getBoundingClientRect();
+    return { x: r.left - a.left + r.width / 2, y: r.top - a.top + r.height / 2 };
+  }
+  function targetEl(pid) {
+    if (pid === S.me) return $('#hand').children.length ? $('#hand') : $('#meName');
+    return document.querySelector(`.seat[data-pid="${pid}"] .frame`);
+  }
+  function flyCard(fromEl, toEl, delay = 0, html = null) {
+    if (!fromEl || !toEl) return;
+    const from = centerOf(fromEl), to = centerOf(toEl);
+    const holder = document.createElement('div');
+    holder.innerHTML = html || "<div class=\"card back\"><span>LIAR'S</span></div>";
+    const el = holder.firstElementChild;
+    $('#flyLayer').appendChild(el);
+    const w = el.offsetWidth / 2, h = el.offsetHeight / 2;
+    const spin = (Math.random() * 40 - 20) | 0;
+    const anim = el.animate([
+      { transform: `translate(${from.x - w}px, ${from.y - h}px) rotate(-14deg) scale(1)`, opacity: 1 },
+      { transform: `translate(${(from.x + to.x) / 2 - w}px, ${Math.min(from.y, to.y) - h - 50}px) rotate(${spin + 180}deg) scale(1.1)`, opacity: 1, offset: 0.5 },
+      { transform: `translate(${to.x - w}px, ${to.y - h}px) rotate(${spin + 360}deg) scale(.55)`, opacity: 0.2 },
+    ], { duration: 520, delay, easing: 'cubic-bezier(.3,.7,.4,1)', fill: 'both' });
+    anim.onfinish = () => el.remove();
+  }
+  function flyDraw(pid, n) {
+    const deck = $('#drawPile .s1');
+    const to = targetEl(pid);
+    for (let i = 0; i < Math.min(n, 6); i++) flyCard(deck, to, i * 120);
+    if (pid !== S.me) setTimeout(() => shakeSeat(pid), 300);
+  }
+  function dealAnim() {
+    const deck = $('#drawPile .s1');
+    const ids = (S ? S.players : []).map((p) => p.id);
+    for (let r = 0; r < 4; r++) ids.forEach((id, k) => flyCard(deck, targetEl(id) || $('#meName'), r * 140 + k * 40));
+  }
+  function shakeSeat(pid) {
+    const s = pid === S.me ? $('#meName') : document.querySelector(`.seat[data-pid="${pid}"]`);
+    if (!s) return;
+    s.classList.remove('shake'); void s.offsetWidth; s.classList.add('shake');
+    setTimeout(() => s.classList.remove('shake'), 600);
+  }
+  function confetti(x, y, count = 40) {
+    const b = document.createElement('div');
+    b.className = 'burst';
+    b.style.left = x + 'px'; b.style.top = y + 'px';
+    const cols = ['#e8272b', '#f7c21b', '#2fae54', '#1f7fe0', '#fff'];
+    for (let i = 0; i < count; i++) {
+      const p = document.createElement('i');
+      const ang = Math.random() * Math.PI * 2, dist = 120 + Math.random() * 260;
+      p.style.background = cols[i % cols.length];
+      p.style.setProperty('--dx', Math.cos(ang) * dist + 'px');
+      p.style.setProperty('--dy', Math.sin(ang) * dist + 'px');
+      p.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
+      p.style.animationDelay = (Math.random() * 0.15) + 's';
+      b.appendChild(p);
+    }
+    $('#flyLayer').appendChild(b);
+    setTimeout(() => b.remove(), 1600);
+  }
+
+  // ================= Big pop-ups =================
+  const popQueue = [];
+  let popBusy = false;
+  function bigPop(o) {
+    popQueue.push(o);
+    if (!popBusy) nextPop();
+  }
+  function nextPop() {
+    const o = popQueue.shift();
+    if (!o) { popBusy = false; return; }
+    popBusy = true;
+    const el = document.createElement('div');
+    el.className = 'pop ' + (o.cls || '');
+    el.innerHTML = `${o.glyph ? `<span class="glyph" ${o.small ? 'style="font-size:min(84px,15vw)"' : ''}>${esc(o.glyph)}</span>` : ''}
+      ${o.word ? `<span class="word">${esc(o.word)}</span>` : ''}${o.sub ? `<span class="sub">${esc(o.sub)}</span>` : ''}`;
+    $('#bigfx').appendChild(el);
+    if (o.sound) sound(o.sound);
+    if (o.confetti) { const c = centerOf($('#bigfx')); confetti(c.x, c.y); }
+    setTimeout(() => el.remove(), 1500);
+    setTimeout(nextPop, popQueue.length > 2 ? 650 : 1050);
+  }
+  function bigFx(f) {
+    const n = (id) => pName(id);
+    const colCls = { red: 'red', green: 'green', blue: 'blue', yellow: '' };
+    switch (f.kind) {
+      case 'skip': bigPop({ glyph: '⊘', word: 'SKIP!', sub: `${n(f.target)} loses a turn`, cls: 'red shakey', sound: 'whoosh' }); shakeSeat(f.target); break;
+      case 'reverse': {
+        const ring = $('#dirRing'); ring.classList.add('burst'); setTimeout(() => ring.classList.remove('burst'), 1200);
+        bigPop({ glyph: '⇄', word: 'REVERSE!', sub: f.target ? `${n(f.target)} is skipped` : 'Direction flipped', cls: 'blue spin', sound: 'whoosh' });
+        break;
+      }
+      case 'draw2': bigPop({ glyph: '+2', word: 'DRAW TWO!', sub: `${n(f.target)} draws 2`, cls: 'shakey', sound: 'whoosh' }); break;
+      case 'wd4': bigPop({ glyph: '+4', word: 'WILD!', sub: `${n(f.target)} draws 4 · color is ${cap(f.color)}`, cls: (colCls[f.color] || '') + ' shakey', sound: 'whoosh' }); break;
+      case 'swap': bigPop({ glyph: '7', word: 'SWAP!', sub: `${n(f.a)} ⇄ ${n(f.b)}`, cls: 'spin', sound: 'whoosh' }); shakeSeat(f.a); shakeSeat(f.b); break;
+      case 'zero': bigPop({ glyph: '0', word: 'PASS IT ON!', sub: 'Everyone passes their hand', cls: 'spin', sound: 'whoosh' }); break;
+      case 'busted': bigPop({ glyph: '✗', word: 'BUSTED!', sub: `${n(f.target)} was lying! It was a ${label(f.card)}`, cls: 'red shakey', sound: 'busted' }); shakeSeat(f.target); break;
+      case 'truth': bigPop({ glyph: '✓', word: 'TRUTH!', sub: `${n(f.target)} wasn't lying · ${n(f.by)} draws 1`, cls: 'green', sound: 'truth' }); shakeSeat(f.by); break;
+      case 'uno': bigPop({ glyph: 'UNO!', word: '', sub: `${n(f.target)} has one card left!`, sound: 'uno', confetti: true, small: true }); break;
+      case 'caught': bigPop({ glyph: '!', word: 'CAUGHT!', sub: `${n(f.target)} forgot to yell UNO · +2 cards`, cls: 'red shakey', sound: 'busted' }); shakeSeat(f.target); break;
+      case 'wlc': bigPop({ glyph: '?!', word: "LIAR'S CHALLENGE!", sub: `${n(f.target)} calls ${String(f.color).toUpperCase()}`, cls: (colCls[f.color] || '') + ' spin', sound: 'alert' }); break;
+      default: break;
+    }
+  }
+  socket.on('fx', (f) => {
+    if (!S) return;
+    if (f.t === 'draw') { flyDraw(f.pid, f.n); sound('draw'); }
+    else if (f.t === 'deal') { dealAnim(); sound('deal'); }
+    else if (f.t === 'play') sound('flip');
+    else if (f.t === 'big') bigFx(f);
+    else if (f.t === 'win') {
+      const iWon = f.ids.includes(S.me);
+      bigPop({ glyph: iWon ? '🏆' : '★', word: iWon ? 'YOU WIN!' : `${f.ids.map(pName).join(' & ')} WINS!`, sound: 'win', confetti: true });
+    }
+  });
+  function yourTurnAlert(text) {
+    bigPop({ glyph: text, word: '', small: true, sound: 'turn' });
+    try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {}
+  }
+
   // ================= Render =================
   let modalKind = null;
   let dismissedResultFor = 0;
   let wlcSelected = null;
+  let lastLandSeq = -1;
+  let prevHandIds = null;
+  let prevHandNum = 0;
+  let pointerAng = 90;
 
   socket.on('state', (st) => {
     const prev = S;
@@ -285,9 +468,13 @@
     if (S.wlc) wlcEnd = Date.now() + S.wlc.msLeft;
     if (S.phase !== 'wlc-submit') wlcSelected = null;
     if (wlcSelected && !S.hand.some((c) => c.id === wlcSelected)) wlcSelected = null;
-    // Close pickers that no longer make sense
     if (['claim', 'color', 'target'].includes(modalKind) && !myTurn()) closeModal();
     render();
+    // Turn alerts
+    if (isMine(S) && !isMine(prev)) yourTurnAlert('YOUR TURN!');
+    else if (isMine(S) && isMine(prev) && prev.topSeq !== S.topSeq && S.topPid === S.me) yourTurnAlert('GO AGAIN!');
+    if (mustSubmit(S) && !mustSubmit(prev)) yourTurnAlert('PICK A CARD!');
+    if (canCall(S) && !canCall(prev)) sound('alert');
   });
 
   function render() {
@@ -296,40 +483,77 @@
     $('#roomChip').textContent = 'Room ' + S.code;
     $('#handChip').textContent = S.handNum ? `Hand #${S.handNum}` : 'Lobby';
     $('#targetLbl').textContent = `(first to ${S.target})`;
+    $('#arena').classList.toggle('my-turn', myTurn() || !!mustSubmit(S));
+    renderTurnPill();
     renderSeats();
     renderScores();
     renderMiddle();
     renderMe(m);
     renderActionPanel();
     renderResultModal();
+    renderPointer();
     $('#resetScoresBtn').classList.toggle('hidden', !(S.hostId === S.me && ['lobby', 'handover'].includes(S.phase)));
+  }
+  let rT = null;
+  window.addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(render, 120); });
+
+  function renderTurnPill() {
+    const p = $('#turnPill');
+    let txt = '', mine = false;
+    if (S.phase === 'play' || S.phase === 'challenge') {
+      if (S.turnId === S.me && S.phase === 'play') { txt = '🟡 YOUR TURN!'; mine = true; }
+      else if (S.phase === 'challenge') txt = `🤔 ${pName(S.pending && S.pending.playerId)} might be bluffing...`;
+      else txt = `⏳ ${pName(S.turnId)}'s turn`;
+    } else if (S.phase === 'wlc-submit') { mine = !!mustSubmit(S); txt = mine ? '🟡 PICK A CARD TO PUT DOWN!' : "🃏 Wild Liar's Challenge"; }
+    else if (S.phase === 'wlc-judge') { mine = S.wlc && S.wlc.playerId === S.me; txt = mine ? '🟡 FLIP SOMEONE\'S CARD!' : `🔎 ${pName(S.wlc && S.wlc.playerId)} is flipping cards`; }
+    else if (S.phase === 'handover') txt = '🏆 Hand over';
+    else txt = '🪑 Waiting room';
+    p.textContent = txt;
+    p.classList.toggle('mine', mine);
+    p.classList.remove('hidden');
+  }
+
+  const SLOTS = { 1: ['top'], 2: ['tl', 'tr'], 3: ['left', 'top', 'right'], 4: ['left', 'tl', 'tr', 'right'], 5: ['left', 'tl', 'top', 'tr', 'right'] };
+  function slotPos(slot) {
+    const narrow = arena().clientWidth < 700;
+    const P = narrow
+      ? { left: [13, 25, 'left'], tl: [28, 10, 'top'], top: [50, 10, 'top'], tr: [72, 10, 'top'], right: [84, 25, 'right'] }
+      : { left: [9, 42, 'left'], tl: [28, 14, 'top'], top: [50, 12, 'top'], tr: [72, 14, 'top'], right: [91, 42, 'right'] };
+    return P[slot];
   }
 
   function renderSeats() {
     const box = $('#seats');
     const others = S.players.filter((p) => p.id !== S.me);
-    if (!others.length) { box.innerHTML = '<div class="seat waiting"><div class="seat-name">Waiting for someone to join...</div><div class="seat-sub">Copy the invite link up top 👆</div></div>'; return; }
-    // Order seats starting from the player after me
+    if (!others.length) { box.innerHTML = '<div class="empty-seat">Waiting for someone to join...<br><small>Hit 🔗 Copy invite link up top</small></div>'; return; }
     const ids = S.players.map((p) => p.id);
     const myIdx = ids.indexOf(S.me);
     const ordered = [...S.players.slice(myIdx + 1), ...S.players.slice(0, myIdx)];
-    box.innerHTML = ordered.map((p) => {
-      const color = AVATAR_COLORS[S.players.indexOf(p) % AVATAR_COLORS.length];
-      const isTurn = S.turnId === p.id;
-      const fan = Array.from({ length: Math.min(p.count, 12) }, () => '<i></i>').join('');
+    const slots = SLOTS[Math.min(ordered.length, 5)];
+    const fanMax = arena().clientWidth < 700 ? 8 : 14;
+    box.innerHTML = ordered.map((p, i) => {
+      const [x, y, side] = slotPos(slots[i]);
+      const isTurn = S.turnId === p.id && ['play', 'challenge'].includes(S.phase);
+      const inHand = p.inHand;
+      const fan = inHand ? `<div class="fan">${Array.from({ length: Math.min(p.count, fanMax) }, () => "<div class=\"card back\"><span>LIAR'S</span></div>").join('')}</div>` : '';
       const kick = S.hostId === S.me && ['lobby', 'handover'].includes(S.phase)
         ? `<button class="btn ghost kick-btn" data-kick="${p.id}" type="button">Remove</button>` : '';
-      return `<div class="seat ${isTurn ? 'turn' : ''} ${p.connected ? '' : 'offline'} ${p.inHand || S.phase === 'lobby' ? '' : 'waiting'}">
-        <div class="seat-top">
-          ${avatarHTML(p)}
-          <div class="seat-name">${esc(p.name)}</div>
-          ${p.calledUno && p.count <= 2 ? '<span class="badge uno">UNO!</span>' : ''}
-          ${p.id === S.hostId ? '<span class="badge host">host</span>' : ''}
+      const tags = [
+        isTurn ? '<span class="tag turn">▶ THEIR TURN</span>' : '',
+        p.calledUno && p.count <= 2 && inHand ? '<span class="tag uno">UNO!</span>' : '',
+        p.id === S.hostId ? '<span class="tag host">👑 host</span>' : '',
+        !p.connected ? '<span class="tag">offline</span>' : '',
+        S.phase !== 'lobby' && !inHand ? '<span class="tag">next hand</span>' : '',
+      ].join('');
+      return `<div class="seat side-${side}" data-pid="${p.id}" style="left:${x}%;top:${y}%">
+        <div class="seat-row">
+          <div><div class="banner">${esc(p.name)}</div>${frameHTML(p, isTurn)}</div>
+          ${inHand ? `<div class="count-badge"><span class="mc">${p.count}</span></div>` : ''}
         </div>
-        <div class="seat-sub">${S.phase === 'lobby' ? 'Ready' : p.inHand ? `${p.count} card${p.count === 1 ? '' : 's'}` : 'Joins next hand'} · ${p.score} pts${p.connected ? '' : ' · offline'}${isTurn ? ' · <b style="color:var(--gold)">their turn</b>' : ''}</div>
-        ${p.inHand ? `<div class="mini-fan">${fan}</div>` : ''}
-        ${p.exposed ? `<button class="catch-btn" data-catch="${p.id}" type="button">🎯 Catch! They didn't say UNO</button>` : ''}
+        <div class="seat-tags">${tags}</div>
+        ${p.exposed ? `<button class="catch-btn" data-catch="${p.id}" type="button">🎯 Catch! No UNO</button>` : ''}
         ${kick}
+        ${fan}
       </div>`;
     }).join('');
   }
@@ -345,16 +569,18 @@
     const sorted = [...S.players].sort((a, b) => b.score - a.score);
     $('#scores').innerHTML = sorted.map((p) => `
       <div class="score-row">
-        <span class="score-name">${avatarHTML(p)}${esc(p.name)}${p.id === S.me ? ' <small>(you)</small>' : ''}</span>
+        <span class="score-name">${miniAv(p)}${esc(p.name)}${p.id === S.me ? ' <small>(you)</small>' : ''}</span>
         <span>${p.score} <small>· ${p.wins} won</small></span>
         <div class="bar"><div style="width:${Math.min(100, p.score / S.target * 100)}%"></div></div>
       </div>`).join('');
   }
 
+  const rotFor = (seq) => ((seq * 47) % 36) - 18;
+  const offFor = (seq) => [((seq * 13) % 16) - 8, ((seq * 7) % 12) - 6];
   function renderMiddle() {
     const lobby = S.phase === 'lobby';
     $('#lobbyBox').classList.toggle('hidden', !lobby);
-    $('#pileBox').classList.toggle('hidden', lobby);
+    $('#center').classList.toggle('hidden', lobby);
     if (lobby) {
       const n = S.players.length;
       const host = S.hostId === S.me;
@@ -369,28 +595,56 @@
       $('#status').innerHTML = '';
       return;
     }
-    // Draw pile
+    // Deck
     $('#deckCount').textContent = `${S.deckCount} left`;
     $('#drawPile').disabled = !(myTurn() && S.drawnCard == null);
-    // Discard
+    // Messy discard pile
+    const under = (S.pile || []).map((e) => {
+      const [ox, oy] = offFor(e.seq);
+      const st = `style="transform:translate(${ox}px,${oy}px) rotate(${rotFor(e.seq)}deg)"`;
+      return e.back ? `<div class="card back under" ${st}><span>LIAR'S</span></div>` : cardHTML(e.card, 'under').replace('<div class="card', `<div ${st} class="card`);
+    }).join('');
     const t = S.top;
-    let html = '';
+    let topHtml = '';
     if (t) {
+      const seq = S.topSeq || 0;
+      const [ox, oy] = offFor(seq);
+      const st = `style="transform:translate(${ox}px,${oy}px) rotate(${rotFor(seq)}deg)"`;
       if (t.faceDown && !t.revealed) {
-        html = cardHTML(null) + (t.claim ? `<div class="claim-tag">says: ${esc(label(t.claim))}</div>` : '');
+        topHtml = `<div class="card back top" ${st}><span>LIAR'S</span></div>` + (t.claim ? `<div class="claim-tag">says: ${esc(label(t.claim))}</div>` : '');
       } else {
-        html = cardHTML(t.card) + (t.revealed ? '<div class="claim-tag">✓ was true</div>' : '');
+        topHtml = cardHTML(t.card, 'top').replace('<div class="card', `<div ${st} class="card`) + (t.revealed ? '<div class="claim-tag true">✓ it was true</div>' : '');
       }
     }
-    html += `<div class="color-ring" style="border-color:var(--${S.currentColor || 'line'})"></div>`;
-    $('#discard').innerHTML = html;
-    $('#colorLabel').innerHTML = S.currentColor ? `Color: <b style="color:var(--${S.currentColor})">${cap(S.currentColor)} ${SYM[S.currentColor]}</b>` : '';
-    $('#dirBox').textContent = S.dir === 1 ? '↻' : '↺';
-    $('#dirBox').title = S.dir === 1 ? 'Clockwise' : 'Counter-clockwise';
+    $('#discard').innerHTML = under + topHtml;
+    // Animate the newest card flying in from whoever played it
+    const topEl = $('#discard .card.top');
+    if (topEl && S.topSeq > lastLandSeq) {
+      if (lastLandSeq >= 0 && S.topPid) {
+        const src = targetEl(S.topPid);
+        if (src) {
+          const a = centerOf(src), b = centerOf(topEl);
+          const [ox, oy] = offFor(S.topSeq), rot = rotFor(S.topSeq);
+          topEl.animate([
+            { transform: `translate(${a.x - b.x}px, ${a.y - b.y}px) rotate(${rot - 200}deg) scale(.75)` },
+            { transform: `translate(${ox}px, ${oy - 30}px) rotate(${rot}deg) scale(1.25)`, offset: 0.75 },
+            { transform: `translate(${ox}px, ${oy}px) rotate(${rot}deg) scale(1)` },
+          ], { duration: 560, easing: 'cubic-bezier(.25,.9,.35,1)' });
+        }
+      }
+      lastLandSeq = S.topSeq;
+    }
+    // Color + direction
+    const col = S.currentColor;
+    $('#colorGlow').style.background = col ? `radial-gradient(circle, var(--${col}) 0%, transparent 68%)` : 'transparent';
+    $('#colorLabel').className = 'color-chip ' + (col || '');
+    $('#colorLabel').style.background = col ? `var(--${col})` : 'transparent';
+    $('#colorLabel').innerHTML = col ? `COLOR: ${col.toUpperCase()} ${SYM[col]}` : '';
+    $('#dirRing').classList.toggle('ccw', S.dir === -1);
     // Status line
     let s = '';
     if (S.phase === 'play') {
-      if (myTurn()) s = S.drawnCard != null ? '<b>Play the card you drew</b> (lifted) or hit Keep & pass.' : '<b>Your turn!</b> Play a card, bluff with a Liar\'s card, or draw.';
+      if (myTurn()) s = S.drawnCard != null ? '<b>Play the card you drew</b> (glowing) or hit Keep & pass.' : '<b>Your turn!</b> Play a card, bluff with a Liar\'s card, or draw.';
       else s = `Waiting for <b>${esc(pName(S.turnId))}</b>...`;
     } else if (S.phase === 'handover') s = 'Hand over! 🎉 <button class="btn red" id="reopenBtn" type="button">Next hand →</button>';
     $('#status').innerHTML = s;
@@ -399,10 +653,28 @@
   }
   $('#drawPile').onclick = () => socket.emit('draw');
 
+  function renderPointer() {
+    const ptr = $('#pointer');
+    let pid = null;
+    if (['play', 'challenge'].includes(S.phase)) pid = S.phase === 'challenge' && S.pending ? S.pending.playerId : S.turnId;
+    else if (S.phase === 'wlc-judge' && S.wlc) pid = S.wlc.playerId;
+    const el = pid && (pid === S.me ? $('#meName .frame') : document.querySelector(`.seat[data-pid="${pid}"] .frame`));
+    if (!el) { ptr.classList.add('off'); return; }
+    const c = centerOf($('#center')), t = centerOf(el);
+    let ang = Math.atan2(t.y - c.y, t.x - c.x) * 180 / Math.PI;
+    while (ang - pointerAng > 180) ang -= 360;
+    while (ang - pointerAng < -180) ang += 360;
+    pointerAng = ang;
+    ptr.style.setProperty('--ang', ang + 'deg');
+    ptr.classList.remove('off');
+  }
+
   function renderMe(m) {
     if (!m) return;
-    $('#meName').innerHTML = `${avatarHTML(m, 'me-av')} ${esc(m.name)} <small>${m.score} pts${S.hostId === S.me ? ' · host' : ''}</small>`;
     const inHand = m.inHand && S.phase !== 'lobby';
+    const turn = myTurn() || !!mustSubmit(S) || (S.phase === 'wlc-judge' && S.wlc && S.wlc.playerId === S.me);
+    $('#meName').innerHTML = `<div class="banner">${esc(m.name)}</div>${frameHTML(m, turn)}
+      <div class="sub">${inHand ? `${S.hand.length} card${S.hand.length === 1 ? '' : 's'} · ` : ''}${m.score} pts${m.calledUno && S.hand.length <= 2 && inHand ? ' · <span class="tag uno">UNO!</span>' : ''}</div>`;
     const unoOk = inHand && S.phase !== 'handover' && !m.calledUno &&
       (S.hand.length === 1 || (S.hand.length === 2 && myTurn()));
     $('#drawBtn').disabled = !(myTurn() && S.drawnCard == null);
@@ -414,15 +686,53 @@
     $('#unoBtn').classList.toggle('hidden', !inHand);
 
     const hand = sortHand(S.hand);
-    const wlcPick = S.phase === 'wlc-submit' && S.wlc && S.wlc.playerId !== S.me && !S.wlc.claims[S.me] && inHand;
+    const wlcPick = mustSubmit(S);
+    const newDeal = S.handNum !== prevHandNum;
+    const fresh = new Set(prevHandIds && !newDeal ? hand.filter((c) => !prevHandIds.has(c.id)).map((c) => c.id) : newDeal && S.phase !== 'lobby' ? hand.map((c) => c.id) : []);
     $('#hand').innerHTML = hand.length ? hand.map((c) => {
       let cls = '';
       if (myTurn()) {
         if (S.drawnCard != null) cls = c.id === S.drawnCard ? 'playable' : 'dim';
         else cls = c.liar || matches(c) ? 'playable' : 'dim';
       } else if (wlcPick) cls = 'selectable' + (c.id === wlcSelected ? ' selected' : '');
+      if (fresh.has(c.id)) cls += ' fresh';
       return cardHTML(c, cls);
     }).join('') : (S.phase === 'lobby' ? '<p class="hint">Your cards will show up here.</p>' : !m.inHand ? '<p class="hint">You\'ll be dealt in next hand. Grab a snack. 🍿</p>' : '');
+    layoutHand(fresh, newDeal);
+    prevHandIds = new Set(hand.map((c) => c.id));
+    prevHandNum = S.handNum;
+  }
+
+  // Fan the hand into an arc and squeeze it to fit
+  function layoutHand(fresh, newDeal) {
+    const cards = [...$('#hand').querySelectorAll('.card')];
+    const n = cards.length;
+    if (!n) return;
+    const W = $('#hand').clientWidth - 20;
+    const cw = cards[0].offsetWidth;
+    let gap = n > 1 ? (W - n * cw) / (n - 1) : 0;
+    gap = Math.max(-cw * 0.86, Math.min(gap, 4));
+    const step = Math.min(5, 44 / n);
+    const drop = Math.min(16, n * 2);
+    const deck = $('#drawPile .s1');
+    const dc = deck && !$('#center').classList.contains('hidden') ? centerOf(deck) : null;
+    let k = 0;
+    cards.forEach((el, i) => {
+      if (i) el.style.marginLeft = gap + 'px';
+      const t = n > 1 ? (i / (n - 1)) * 2 - 1 : 0;
+      el.style.setProperty('--r', (i - (n - 1) / 2) * step + 'deg');
+      el.style.setProperty('--y', t * t * drop + 'px');
+      el.style.zIndex = i + 1;
+      if (el.classList.contains('fresh')) {
+        if (dc) {
+          const c = centerOf(el);
+          el.style.setProperty('--fx', (dc.x - c.x) + 'px');
+          el.style.setProperty('--fy', (dc.y - c.y) + 'px');
+        }
+        el.style.animationDelay = (newDeal ? 150 + k * 90 : 250 + k * 120) + 'ms';
+        k++;
+      }
+    });
   }
 
   $('#hand').addEventListener('click', (e) => {
@@ -648,6 +958,17 @@
     try { await navigator.clipboard.writeText(link); alertToast('Invite link copied! Send it to your opponents. 😈'); }
     catch { prompt('Copy this link:', link); }
   };
+
+  // Floating red shards in the background
+  for (let i = 0; i < 16; i++) {
+    const sh = document.createElement('i');
+    sh.style.left = Math.random() * 100 + '%';
+    sh.style.top = 20 + Math.random() * 90 + '%';
+    sh.style.animationDuration = 6 + Math.random() * 8 + 's';
+    sh.style.animationDelay = -Math.random() * 10 + 's';
+    sh.style.transform = `rotate(${Math.random() * 90}deg)`;
+    $('#shards').appendChild(sh);
+  }
 
   // ================= Start =================
   let passed = false;
